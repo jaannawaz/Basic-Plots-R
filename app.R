@@ -1,191 +1,281 @@
 library(shiny)
 library(ggplot2)
-library(ggpubr)
+library(dplyr)
+library(tidyr)
 library(rstatix)
+library(ggpubr)
+library(gridExtra)
 
-# Define UI
 ui <- fluidPage(
-    titlePanel("Violin Plot Generator"),
+    titlePanel("Data Visualization"),
     
     sidebarLayout(
         sidebarPanel(
-            # File upload
-            fileInput("file", "Upload CSV file", accept = c(".csv")),
+            fileInput("file", "Upload CSV File", accept = c(".csv")),
             
-            # Figure dimensions
-            numericInput("figure_width", "Figure width:", 8, min = 1, max = 20),
-            numericInput("figure_height", "Figure height:", 6, min = 1, max = 20),
-            
-            # Axis limits
-            numericInput("y_min", "Y-axis minimum:", 0),
-            numericInput("y_max", "Y-axis maximum:", 40),
-            
-            # Font sizes
-            numericInput("ticks_fontsize", "Ticks fontsize:", 12),
-            numericInput("ticks_rotation", "Ticks rotation:", 0),
-            numericInput("label_fontsize", "Label fontsize:", 16),
-            numericInput("legend_title_fontsize", "Legend title fontsize:", 12),
-            numericInput("legend_size", "Legend size:", 12),
-            
-            # Colors
-            textInput("color_low", "Color (low):", "#E64B35"),
-            textInput("color_middle", "Color (middle):", "#4DBBD5"),
-            textInput("color_high", "Color (high):", "#00A087"),
-            
-            # Statistical method
-            selectInput("stat_method", "Statistical method:",
-                       choices = c(
-                           "t.test (two groups)" = "t.test",
-                           "Wilcoxon test (two groups)" = "wilcox.test",
-                           "ANOVA (multi groups)" = "anova",
-                           "Kruskal-Wallis (multi groups)" = "kruskal"
+            selectInput("plot_type", "Select Plot Type:",
+                       choices = list(
+                           "Violin Plot" = "violin",
+                           "Box Plot" = "box",
+                           "Bar Plot" = "bar",
+                           "Scatter Plot" = "scatter"
                        )),
             
-            # Dynamic comparison pairs
-            uiOutput("comparison_ui"),
+            uiOutput("var_select"),
             
-            # Download button
-            downloadButton("downloadPlot", "Download Plot (PNG)")
+            selectInput("stat_test", "Statistical Test:",
+                       choices = list(
+                           "T-test" = "t.test",
+                           "Wilcoxon" = "wilcox.test",
+                           "ANOVA" = "anova",
+                           "Kruskal-Wallis" = "kruskal"
+                       )),
+            
+            # Plot customization
+            conditionalPanel(
+                condition = "input.plot_type == 'violin'",
+                sliderInput("violin_width", "Violin Width:",
+                           min = 0.3, max = 2, value = 0.8, step = 0.1),
+                sliderInput("violin_alpha", "Violin Transparency:",
+                           min = 0, max = 1, value = 0.7, step = 0.1)
+            ),
+            
+            # Axis customization
+            numericInput("y_min", "Y-axis Minimum:", value = NA),
+            numericInput("y_max", "Y-axis Maximum:", value = NA),
+            numericInput("y_breaks", "Y-axis Break Step:", value = NA),
+            
+            numericInput("axis_label_size", "Axis Label Size:", 
+                        value = 12, min = 8, max = 20),
+            numericInput("axis_text_size", "Axis Text Size:", 
+                        value = 10, min = 6, max = 18),
+            
+            tags$hr(),
+            tags$h4("Download Options"),
+            numericInput("download_width", "Download Width (inches):", 
+                        value = 10, min = 5, max = 20),
+            numericInput("download_height", "Download Height (inches):", 
+                        value = 8, min = 4, max = 16),
+            numericInput("download_dpi", "Resolution (DPI):", 
+                        value = 300, min = 72, max = 600),
+            selectInput("download_format", "File Format:",
+                       choices = list(
+                           "PNG" = "png",
+                           "PDF" = "pdf",
+                           "TIFF" = "tiff"
+                       )),
+            downloadButton("downloadPlot", "Download Plot")
         ),
         
         mainPanel(
-            plotOutput("violinPlot", height = "600px"),
-            verbatimTextOutput("statTest")
+            plotOutput("plot", height = "600px"),
+            verbatimTextOutput("stats")
         )
     )
 )
 
-# Define server logic
 server <- function(input, output, session) {
-    
-    # Reactive expression to read data and identify columns
-    data_reactive <- reactive({
+    # Read data
+    data <- reactive({
         req(input$file)
-        data <- read.csv(input$file$datapath)
-        list(data = data, condition_col = names(data)[1], value_col = names(data)[2])
+        df <- read.csv(input$file$datapath)
+        df[[1]] <- factor(df[[1]])  # Convert first column to factor
+        return(df)
     })
     
-    # Update comparison pairs based on the uploaded data
-    output$comparison_ui <- renderUI({
-        req(data_reactive())
-        data <- data_reactive()$data
-        condition_col <- data_reactive()$condition_col
-        
-        # Get unique groups
-        unique_groups <- unique(data[[condition_col]])
-        
-        # Create comparison pairs
-        comparisons <- combn(unique_groups, 2, simplify = FALSE)
-        comparison_choices <- sapply(comparisons, function(x) paste(x, collapse = " vs "))
-        
-        checkboxGroupInput("comparisons", "Select comparisons:", choices = comparison_choices)
+    # Dynamic variable selection
+    output$var_select <- renderUI({
+        req(data())
+        vars <- names(data())[-1]
+        selectInput("variables", 
+                   "Select Variables:", 
+                   choices = vars,
+                   multiple = TRUE,
+                   selected = vars[1])
     })
     
-    # Create the violin plot
-    plot_violin <- reactive({
-        req(data_reactive())
+    # Create plot
+    output$plot <- renderPlot({
+        req(data(), input$variables, input$plot_type)
         
-        data <- data_reactive()$data
-        condition_col <- data_reactive()$condition_col
-        value_col <- data_reactive()$value_col
+        plots <- lapply(input$variables, function(var) {
+            df <- data()
+            
+            p <- ggplot(df, aes(x = df[[1]], y = .data[[var]], fill = df[[1]])) +
+                labs(x = "Group", y = var, title = var)
+            
+            # Base plot
+            if(input$plot_type == "violin") {
+                p <- p + 
+                    geom_violin(trim = FALSE, 
+                               alpha = input$violin_alpha,
+                               width = input$violin_width) +
+                    geom_boxplot(width = 0.2, alpha = 0.7, fill = "white")
+            } else if(input$plot_type == "box") {
+                p <- p + geom_boxplot(alpha = 0.7)
+            } else if(input$plot_type == "bar") {
+                p <- p + 
+                    stat_summary(fun = mean, geom = "bar") +
+                    stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2)
+            } else if(input$plot_type == "scatter") {
+                p <- p + 
+                    geom_point(aes(color = df[[1]]), alpha = 0.6) +
+                    geom_smooth(method = "lm", se = TRUE)
+            }
+            
+            # Add statistical comparisons
+            if(input$plot_type != "scatter") {
+                group_levels <- levels(df[[1]])
+                if(length(group_levels) >= 2) {
+                    p <- p + stat_compare_means(
+                        comparisons = combn(group_levels, 2, simplify = FALSE),
+                        method = input$stat_test,
+                        label = "p.format"
+                    )
+                }
+            }
+            
+            # Set axis limits if provided and valid
+            if(!is.na(input$y_min) && !is.na(input$y_max)) {
+                p <- p + coord_cartesian(
+                    ylim = c(input$y_min, input$y_max)
+                )
+            }
+            
+            # Add breaks if provided and valid
+            if(!is.na(input$y_breaks)) {
+                y_min <- if(is.na(input$y_min)) min(df[[var]], na.rm = TRUE) else input$y_min
+                y_max <- if(is.na(input$y_max)) max(df[[var]], na.rm = TRUE) else input$y_max
+                p <- p + scale_y_continuous(
+                    breaks = seq(y_min, y_max, by = input$y_breaks)
+                )
+            }
+            
+            # Theme and colors
+            p <- p + 
+                theme_classic() +
+                scale_fill_brewer(palette = "Set2") +
+                scale_color_brewer(palette = "Set2") +
+                theme(
+                    axis.text = element_text(size = input$axis_text_size),
+                    axis.title = element_text(size = input$axis_label_size),
+                    legend.position = "top",
+                    plot.margin = margin(t = 40, r = 20, b = 20, l = 20, unit = "pt")
+                )
+            
+            return(p)
+        })
         
-        # Create plot
-        p <- ggviolin(data, x = condition_col, y = value_col, fill = condition_col,
-                     add = "boxplot", 
-                     add.params = list(fill = "white")) +
-            scale_fill_manual(values = c(
-                "low" = input$color_low,
-                "middle" = input$color_middle,
-                "high" = input$color_high
-            )) +
-            theme_minimal() +
-            theme(
-                axis.text = element_text(size = input$ticks_fontsize,
-                                       angle = input$ticks_rotation),
-                axis.title = element_text(size = input$label_fontsize),
-                legend.title = element_text(size = input$legend_title_fontsize),
-                legend.text = element_text(size = input$legend_size)
-            ) +
-            ylim(input$y_min, input$y_max)
-        
-        # Add statistical comparisons
-        if(length(input$comparisons) > 0) {
-            comparisons <- strsplit(input$comparisons, " vs ")
-            comparisons <- lapply(comparisons, function(x) x)
-            p <- p + stat_compare_means(
-                comparisons = comparisons,
-                method = input$stat_method,
-                label = "p.format"
-            )
+        if(length(plots) > 1) {
+            grid.arrange(grobs = plots, ncol = 2)
+        } else {
+            plots[[1]]
         }
-        
-        p
     })
     
-    # Display plot
-    output$violinPlot <- renderPlot({
-        print(plot_violin())
-    }, height = function() input$figure_height * 100,
-       width = function() input$figure_width * 100)
+    # Statistical summary
+    output$stats <- renderPrint({
+        req(data(), input$variables)
+        df <- data()
+        
+        for(var in input$variables) {
+            cat("\nAnalysis for", var, ":\n")
+            cat("\nSummary Statistics:\n")
+            print(df %>%
+                  group_by(across(1)) %>%
+                  summarise(
+                      n = n(),
+                      mean = mean(get(var), na.rm = TRUE),
+                      sd = sd(get(var), na.rm = TRUE),
+                      se = sd/sqrt(n)
+                  ))
+        }
+    })
     
     # Download handler
     output$downloadPlot <- downloadHandler(
         filename = function() {
-            paste("violin_plot_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".png", sep = "")
+            paste0("plot_", format(Sys.time(), "%Y%m%d_%H%M%S"), 
+                   ".", input$download_format)
         },
         content = function(file) {
-            ggsave(file, plot = plot_violin(),
-                   width = input$figure_width,
-                   height = input$figure_height,
-                   dpi = 300)
-        }
-    )
-    
-    # Display statistical test results
-    output$statTest <- renderPrint({
-        req(data_reactive())
-        data <- data_reactive()$data
-        condition_col <- data_reactive()$condition_col
-        value_col <- data_reactive()$value_col
-        
-        cat("Statistical Analysis Results:\n\n")
-        
-        # Perform statistical test based on selection
-        if(input$stat_method == "t.test" || input$stat_method == "wilcox.test") {
-            for(comp in input$comparisons) {
-                groups <- strsplit(comp, " vs ")[[1]]
-                
-                # Check if both groups exist in the data
-                if (all(groups %in% unique(data[[condition_col]])) && length(groups) == 2) {
-                    test_data <- subset(data, data[[condition_col]] %in% groups)
+            # Recreate the plot for high resolution
+            p <- NULL
+            
+            if(length(input$variables) > 1) {
+                # For multiple plots
+                plots <- lapply(input$variables, function(var) {
+                    df <- data()
                     
-                    if(input$stat_method == "t.test") {
-                        result <- t.test(data[[value_col]] ~ data[[condition_col]], data = test_data)
-                    } else {
-                        result <- wilcox.test(data[[value_col]] ~ data[[condition_col]], data = test_data)
+                    p <- ggplot(df, aes(x = df[[1]], y = .data[[var]], 
+                                      fill = df[[1]])) +
+                        labs(x = "Group", y = var, title = var)
+                    
+                    # Add plot elements based on type
+                    if(input$plot_type == "violin") {
+                        p <- p + 
+                            geom_violin(trim = FALSE, 
+                                      alpha = input$violin_alpha,
+                                      width = input$violin_width) +
+                            geom_boxplot(width = 0.2, alpha = 0.7, 
+                                       fill = "white")
+                    } else if(input$plot_type == "box") {
+                        p <- p + geom_boxplot(alpha = 0.7)
+                    } else if(input$plot_type == "bar") {
+                        p <- p + 
+                            stat_summary(fun = mean, geom = "bar") +
+                            stat_summary(fun.data = mean_se, 
+                                       geom = "errorbar", width = 0.2)
+                    } else if(input$plot_type == "scatter") {
+                        p <- p + 
+                            geom_point(aes(color = df[[1]]), alpha = 0.6) +
+                            geom_smooth(method = "lm", se = TRUE)
                     }
                     
-                    cat("\nComparison:", paste(groups, collapse = " vs "), "\n")
-                    print(result)
-                } else {
-                    cat("\nComparison:", paste(groups, collapse = " vs "), " - Not enough data\n")
-                }
+                    # Add statistical comparisons
+                    if(input$plot_type != "scatter") {
+                        group_levels <- levels(df[[1]])
+                        if(length(group_levels) >= 2) {
+                            p <- p + stat_compare_means(
+                                comparisons = combn(group_levels, 2, 
+                                                  simplify = FALSE),
+                                method = input$stat_test,
+                                label = "p.format"
+                            )
+                        }
+                    }
+                    
+                    # Theme and colors
+                    p <- p + 
+                        theme_classic() +
+                        scale_fill_brewer(palette = "Set2") +
+                        scale_color_brewer(palette = "Set2") +
+                        theme(
+                            axis.text = element_text(size = input$axis_text_size),
+                            axis.title = element_text(size = input$axis_label_size),
+                            legend.position = "top",
+                            plot.margin = margin(t = 40, r = 20, b = 20, l = 20, 
+                                              unit = "pt")
+                        )
+                    
+                    return(p)
+                })
+                
+                # Arrange multiple plots
+                p <- gridExtra::arrangeGrob(grobs = plots, ncol = 2)
+            } else {
+                # For single plot
+                p <- plots[[1]]
             }
-        } else if(input$stat_method == "anova") {
-            result <- aov(data[[value_col]] ~ data[[condition_col]], data = data)
-            print(summary(result))
-            # Add Tukey post-hoc test
-            cat("\nTukey Post-hoc Test:\n")
-            print(TukeyHSD(result))
-        } else if(input$stat_method == "kruskal") {
-            result <- kruskal.test(data[[value_col]] ~ data[[condition_col]], data = data)
-            print(result)
-            # Add Dunn's test
-            cat("\nDunn's Post-hoc Test:\n")
-            print(dunn_test(data, data[[value_col]] ~ data[[condition_col]], p.adjust.method = "bonferroni"))
+            
+            # Save with high resolution
+            ggsave(file, plot = p,
+                   width = input$download_width,
+                   height = input$download_height,
+                   dpi = input$download_dpi,
+                   device = input$download_format)
         }
-    })
+    )
 }
 
-# Run the application 
 shinyApp(ui = ui, server = server)
