@@ -6,11 +6,20 @@ RUN apt-get update && apt-get install -y \
     libcurl4-openssl-dev \
     libssl-dev \
     libxml2-dev \
+    libgit2-dev \
+    libfontconfig1-dev \
+    libharfbuzz-dev \
+    libfribidi-dev \
+    libfreetype6-dev \
+    libpng-dev \
+    libtiff5-dev \
+    libjpeg-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install R packages
-COPY requirements.txt /usr/local/src/requirements.txt
-RUN R -e "install.packages(readLines('/usr/local/src/requirements.txt'), repos='http://cran.rstudio.com/')"
+# Install R packages with specific version
+RUN R -e "install.packages(c('rstatix', 'ggpubr', 'tidyr', 'dplyr', 'ggplot2', 'gridExtra'), \
+    repos='https://cloud.r-project.org/', \
+    dependencies=TRUE)"
 
 # Copy the app files
 COPY app.R /usr/local/src/app.R
