@@ -1,0 +1,10 @@
+name: basic-plots-r
+title:
+username: basic-plots
+account: basic-plots
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13539712
+bundleId: 9474600
+url: https://basic-plots.shinyapps.io/basic-plots-r/
+version: 1
