@@ -279,3 +279,5 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui = ui, server = server)
+
+# Developed by Dr Babajan Banaganapalli Email: bioinformatics.bb@gmail.com
