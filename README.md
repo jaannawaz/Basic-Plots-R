@@ -21,7 +21,6 @@ A comprehensive R Shiny application for statistical analysis and data visualizat
 - `app.R`: Main application entry point
 - `basic_plots_app.R`: Basic visualization functionality
 - `volcano_app.R`: Advanced volcano plot functionality
-- `Dockerfile`: Docker configuration
 - `requirements.txt`: R package dependencies
 
 ## Example Datasets
