@@ -9,24 +9,6 @@ A Shiny application for statistical analysis and data visualization.
 - High-resolution plot downloads
 - Multiple variable analysis
 
-## Deployment Instructions
-
-### Prerequisites
-- Docker installed on your system
-- A Render account
-
-### Steps to Deploy on Render
-
-1. Fork or clone this repository
-2. Log in to your Render account
-3. Create a new Web Service
-4. Connect to your repository
-5. Select "Docker" as the environment
-6. Configure the service:
-   - Build Command: `docker build -t shiny-app .`
-   - Start Command: `docker run -p 3838:3838 shiny-app`
-7. Click "Create Web Service"
-
 ## Local Development
 To run the app locally:
 1. Install R and required packages
